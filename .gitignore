@@ -1,0 +1,19 @@
+# Secrets
+secrets.txt
+.env
+.env.*
+
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+
+# Datasets and trained models
+data/
+*.pt
+*.pth
+*.ckpt
+
+# Local documents
+*.docx
+~$*
