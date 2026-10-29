@@ -442,3 +442,229 @@ Training results, model checkpoints and training curves are written to the local
 
 Exact numerical reproducibility may vary slightly between hardware backends, but the fixed splits and recorded configuration allow the experiment to be repeated consistently.
 
+
+## 6. Experimental Results
+
+### 6.1 Overall Classification Performance
+
+Both models were evaluated on the same held-out test set of 4,494 Facebook pages using their saved validation-selected checkpoints.
+
+The evaluation includes accuracy, macro-averaged F1 and one-vs-rest macro-AUROC.
+
+| Metric | MLP Baseline | GCN |
+|---|---:|---:|
+| Test accuracy | 89.01% | **94.57%** |
+| Macro-F1 | 0.8837 | **0.9435** |
+| Macro-AUROC | 0.9788 | **0.9920** |
+| Parameters | 302,020 | 302,020 |
+
+The GCN achieves a 5.56 percentage-point improvement in classification accuracy and an increase of 0.0598 in macro-F1.
+
+Macro-AUROC also improves from 0.9788 to 0.9920, indicating stronger discrimination between the four classes.
+
+Both models contain the same number of trainable parameters, suggesting that the improvement is associated with the GCN's use of graph connectivity rather than increased model capacity.
+
+These results support the hypothesis that neighbouring Facebook pages provide useful contextual information for node classification.
+
+### 6.2 Per-Class Performance
+
+The models were also evaluated using precision, recall and F1 for each classification category.
+
+| Class | MLP Precision | MLP Recall | MLP F1 | GCN Precision | GCN Recall | GCN F1 |
+|---|---:|---:|---:|---:|---:|---:|
+| Company | 0.91 | 0.91 | 0.91 | 0.96 | 0.94 | 0.95 |
+| Government | 0.87 | 0.92 | 0.89 | 0.93 | 0.96 | 0.94 |
+| Politician | 0.89 | 0.88 | 0.89 | 0.96 | 0.95 | 0.95 |
+| TV show | 0.89 | 0.80 | 0.84 | 0.94 | 0.92 | 0.93 |
+
+The GCN improves F1 across all four categories.
+
+The largest improvement occurs for TV shows, where F1 increases from approximately 0.84 to 0.93.
+
+The MLP also has relatively low recall for TV shows (0.80), indicating that approximately one-fifth of TV show pages are incorrectly classified.
+
+By incorporating graph connectivity, the GCN increases TV show recall to 0.92.
+
+This suggests that neighbourhood information is particularly useful for recognising pages whose individual features may be insufficient for reliable classification.
+
+### 6.3 Confusion Matrix Analysis
+
+Confusion matrices were generated for both models to examine how classification errors are distributed across the four categories.
+
+**MLP confusion matrix:**
+
+![MLP confusion matrix](figures/mlp_confusion.png)
+
+**GCN confusion matrix:**
+
+![GCN confusion matrix](figures/gcn_confusion.png)
+
+The GCN confusion matrix shows a stronger concentration of predictions along the main diagonal, indicating fewer misclassifications across the dataset.
+
+The improvement is particularly evident for TV show pages, consistent with the increase in recall and macro-F1.
+
+However, errors remain between some categories, including government, politician and company pages.
+
+These errors motivate further investigation of ambiguous node features and graph neighbourhoods in the failure-case analysis.
+
+### 6.4 Interpretation
+
+The experimental results demonstrate that the GCN performs better than the feature-only MLP across accuracy, macro-F1 and AUROC.
+
+The performance improvement is consistent with graph homophily: connected Facebook pages frequently share related attributes or categories, allowing graph convolution to extract useful information from neighbouring nodes.
+
+Nevertheless, higher classification accuracy does not automatically imply that the GCN produces better-calibrated confidence estimates.
+
+The next section investigates whether model confidence corresponds to correctness and whether uncertain predictions can be referred for human review.
+
+
+## 7. Confidence and Rejection Analysis
+
+### 7.1 Confidence and Prediction Reliability
+
+Classification accuracy measures how frequently a model predicts the correct category, but it does not indicate whether the model's confidence is reliable.
+
+For example, a model may predict a Facebook page belongs to the company category with 99% confidence while the correct category is government.
+
+This is particularly important for an automated classification assistant, where highly uncertain predictions should be referred for human review rather than automatically accepted.
+
+For both models, prediction confidence is defined as the maximum softmax probability across the four output classes.
+
+The relationship between confidence and actual correctness is investigated using Expected Calibration Error (ECE), reliability diagrams and confidence-based rejection thresholds.
+
+### 7.2 Expected Calibration Error
+
+Expected Calibration Error measures the difference between predicted confidence and observed classification accuracy.
+
+Predictions are divided into ten equally spaced confidence intervals. Within each interval, the average confidence is compared against the proportion of correctly classified predictions.
+
+ECE is calculated as:
+
+$$
+\mathrm{ECE} =
+\sum_{b=1}^{B}
+\frac{|S_b|}{N}
+\left|
+\operatorname{accuracy}(S_b)
+-
+\operatorname{confidence}(S_b)
+\right|
+$$
+
+where:
+
+- $B$ is the number of confidence bins.
+- $S_b$ contains predictions assigned to bin $b$.
+- $N$ is the total number of predictions.
+- $\operatorname{accuracy}(S_b)$ is the fraction of correct predictions in bin $b$.
+- $\operatorname{confidence}(S_b)$ is the average confidence within that bin.
+
+Lower ECE indicates better agreement between confidence and observed correctness.
+
+| Model | Test Accuracy | ECE |
+|---|---:|---:|
+| MLP | 89.01% | **0.0149** |
+| GCN | **94.57%** | 0.0190 |
+
+Although the GCN achieves substantially higher classification accuracy, its ECE is slightly worse than the MLP's.
+
+This demonstrates that improved classification performance does not necessarily produce better-calibrated confidence estimates.
+
+However, both models have relatively low ECE, indicating that their overall confidence estimates broadly correspond to observed accuracy.
+
+### 7.3 Reliability Diagrams
+
+Reliability diagrams visualise the relationship between average predicted confidence and empirical accuracy.
+
+A perfectly calibrated model would produce points along the diagonal, where confidence equals observed accuracy.
+
+**MLP reliability diagram:**
+
+![MLP reliability diagram](figures/mlp_reliability.png)
+
+**GCN reliability diagram:**
+
+![GCN reliability diagram](figures/gcn_reliability.png)
+
+Both models exhibit generally strong calibration, although deviations from the diagonal remain.
+
+The GCN's slightly higher ECE indicates a marginally larger average calibration gap.
+
+Importantly, ECE summarises calibration across groups of predictions. It does not guarantee that individual high-confidence predictions are correct.
+
+The failure-case analysis in Section 8 examines examples where the GCN produces incorrect predictions with extremely high confidence.
+
+### 7.4 Confidence-Based Rejection Policy
+
+To investigate whether the models could support automated classification with human oversight, a confidence-based rejection policy was implemented.
+
+Predictions are automatically accepted when their maximum softmax probability exceeds a selected threshold.
+
+Predictions below the threshold are referred for human review.
+
+The operational objective is to maximise the proportion of automatically classified pages while maintaining at least 97% accuracy on accepted predictions in the validation set.
+
+For each model:
+
+1. Evaluate candidate confidence thresholds between 0 and 1.
+2. Measure the accuracy and coverage of accepted validation predictions.
+3. Select the threshold providing the highest validation coverage while achieving at least 97% accepted accuracy.
+4. Apply the selected threshold to the held-out test set without further adjustment.
+
+Coverage is defined as the proportion of predictions accepted automatically.
+
+Accepted accuracy measures classification accuracy among those accepted predictions only.
+
+### 7.5 Rejection Policy Results
+
+| Metric | MLP | GCN |
+|---|---:|---:|
+| Validation-selected threshold | 0.920 | **0.735** |
+| Test coverage | 67.2% | **90.9%** |
+| Accepted test accuracy | 96.9% | **97.2%** |
+| Referred test nodes | 1,476 | **410** |
+| Total test nodes | 4,494 | 4,494 |
+
+The MLP requires a confidence threshold of 0.920 to meet the validation accuracy target. This results in 67.2% test coverage and 96.9% accuracy among accepted test predictions.
+
+The GCN achieves 90.9% coverage with a lower threshold of 0.735, while maintaining 97.2% accepted test accuracy.
+
+Consequently, the GCN automatically processes 1,066 more test pages than the MLP while achieving slightly higher accepted accuracy.
+
+The GCN also reduces the number of pages requiring human review from 1,476 to 410, a reduction of approximately 72.2%.
+
+The MLP's accepted test accuracy falls slightly below the 97% target. This illustrates that satisfying an accuracy constraint on validation data does not guarantee the same result on unseen test data.
+
+### 7.6 Coverage–Accuracy Trade-off
+
+The following figures show how the accuracy of accepted predictions changes as the proportion of automatically classified pages increases.
+
+**MLP rejection analysis:**
+
+![MLP rejection curve](figures/mlp_rejection.png)
+
+**GCN rejection analysis:**
+
+![GCN rejection curve](figures/gcn_rejection.png)
+
+Increasing the confidence threshold generally reduces coverage because fewer predictions qualify for automatic acceptance.
+
+However, accepting only higher-confidence predictions can improve accuracy among the accepted cases.
+
+The GCN provides a more favourable operating trade-off in this experiment, retaining high accepted accuracy while requiring considerably fewer human referrals.
+
+### 7.7 Interpretation and Limitations
+
+The results suggest that graph connectivity improves not only overall classification performance but also the model's ability to separate predictions suitable for automatic acceptance from those requiring review.
+
+Nevertheless, several limitations remain:
+
+- Softmax confidence is not a guarantee of correctness.
+- The GCN has slightly worse overall calibration despite higher classification accuracy.
+- Confidence thresholds were selected on a single validation split.
+- The reported acceptance accuracy and coverage may differ on other datasets or graph structures.
+- Highly confident classification errors remain possible.
+
+The confidence threshold is therefore best interpreted as a prototype decision rule rather than a guaranteed reliability constraint.
+
+Overall, the GCN provides a stronger basis for automated Facebook page classification with selective human review, while the remaining high-confidence errors require further investigation.
