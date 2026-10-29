@@ -106,6 +106,67 @@ def evaluate_classification(predictions, probabilities, graph, name):
     }
 
 
+def reliability_analysis(probabilities, labels, name):
+    """Measure confidence calibration on held-out test nodes."""
+
+    predictions = probabilities.argmax(axis=1)
+    confidence = probabilities.max(axis=1)
+    correct = (predictions == labels)
+
+    # Divide prediction confidence into 10 equal-width bins.
+    bins = np.linspace(0.0, 1.0, 11)
+    bin_ids = np.clip(np.digitize(confidence, bins) - 1, 0, 9)
+
+    mean_confidence = []
+    empirical_accuracy = []
+    ece = 0.0
+
+    for i in range(10):
+        selected = bin_ids == i
+        count = int(selected.sum())
+
+        if count == 0:
+            continue
+
+        avg_confidence = float(confidence[selected].mean())
+        avg_accuracy = float(correct[selected].mean())
+
+        mean_confidence.append(avg_confidence)
+        empirical_accuracy.append(avg_accuracy)
+
+        # Weight each bin's calibration gap by its sample count.
+        ece += (count / len(confidence)) * abs(
+            avg_accuracy - avg_confidence
+        )
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+
+    ax.plot(
+        [0, 1], [0, 1],
+        "--", color="gray", label="Perfect calibration"
+    )
+    ax.plot(
+        mean_confidence,
+        empirical_accuracy,
+        marker="o",
+        label=name.upper()
+    )
+
+    ax.set_xlabel("Mean predicted confidence")
+    ax.set_ylabel("Observed accuracy")
+    ax.set_title(f"{name.upper()} Reliability (ECE={ece:.4f})")
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(
+        OUTPUT_DIR / f"{name}_reliability.png",
+        dpi=150
+    )
+    plt.close(fig)
+
+    return float(ece)
+
+
 def main():
     device = torch.device("cpu")
     graph = load_facebook(seed=42).to(device)
