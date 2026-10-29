@@ -1,7 +1,9 @@
 from pathlib import Path
-
+import json
+import time
+import resource
+from sklearn.manifold import TSNE
 import torch
-
 import matplotlib
 matplotlib.use("Agg")
 
@@ -251,21 +253,195 @@ def plot_rejection(rows, name):
 
 
 
+def analyse_failures(predictions, probabilities, graph, name):
+    """Inspect five representative misclassified test nodes."""
+
+    test_indices = torch.where(graph.test_mask)[0].cpu().numpy()
+    labels = graph.y[graph.test_mask].cpu().numpy()
+    predicted = predictions[graph.test_mask].cpu().numpy()
+    confidence = probabilities[graph.test_mask].max(dim=1).values.cpu().numpy()
+
+    errors = np.where(predicted != labels)[0]
+    ranked = errors[np.argsort(-confidence[errors])]
+
+    # Include confident errors and lower-confidence errors.
+    selected = list(ranked[:3]) + list(ranked[-2:])
+    selected = list(dict.fromkeys(selected))
+
+    edges = graph.edge_index.cpu().numpy()
+    all_labels = graph.y.cpu().numpy()
+
+    cases = []
+
+    for pos in selected:
+        node = int(test_indices[pos])
+
+        neighbours = np.concatenate([
+            edges[1, edges[0] == node],
+            edges[0, edges[1] == node]
+        ])
+        neighbours = np.unique(neighbours)
+
+        counts = np.bincount(
+            all_labels[neighbours], minlength=4
+        ) if len(neighbours) else np.zeros(4, dtype=int)
+
+        case = {
+            "node_index": node,
+            "true_class": CLASS_NAMES[int(labels[pos])],
+            "predicted_class": CLASS_NAMES[int(predicted[pos])],
+            "confidence": round(float(confidence[pos]), 4),
+            "degree": int(len(neighbours)),
+            "neighbour_class_counts": {
+                class_name: int(count)
+                for class_name, count in zip(CLASS_NAMES, counts)
+            }
+        }
+        cases.append(case)
+
+    with open(OUTPUT_DIR / f"{name}_failures.json", "w") as f:
+        json.dump(cases, f, indent=2)
+
+    print(f"\n{name.upper()} Misclassification Examples")
+    for case in cases:
+        print(
+            f"Node {case['node_index']}: "
+            f"{case['true_class']} -> {case['predicted_class']} | "
+            f"Confidence={case['confidence']:.4f} | "
+            f"Neighbours={case['degree']}"
+        )
+
+    return cases
+
+
+def plot_embeddings(model, graph):
+    """Visualise the GCN hidden representations using t-SNE."""
+
+    model.eval()
+
+    with torch.no_grad():
+        embeddings = model.conv1(
+            graph.x, graph.edge_index
+        )
+        embeddings = model.relu(embeddings).cpu().numpy()
+
+    rng = np.random.default_rng(42)
+    sample = rng.choice(
+        len(embeddings),
+        size=min(2000, len(embeddings)),
+        replace=False
+    )
+
+    projected = TSNE(
+        n_components=2,
+        perplexity=30,
+        random_state=42,
+        init="pca",
+        learning_rate="auto"
+    ).fit_transform(embeddings[sample])
+
+    labels = graph.y.cpu().numpy()[sample]
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    for class_id, class_name in enumerate(CLASS_NAMES):
+        selected = labels == class_id
+        ax.scatter(
+            projected[selected, 0],
+            projected[selected, 1],
+            s=9,
+            alpha=0.7,
+            label=class_name
+        )
+
+    ax.set_title("GCN Hidden Representations (t-SNE)")
+    ax.set_xlabel("t-SNE Dimension 1")
+    ax.set_ylabel("t-SNE Dimension 2")
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR / "gcn_tsne.png", dpi=150)
+    plt.close(fig)
+
+
+def profile_inference(model, graph, name, device):
+    """Measure full-graph inference latency and memory."""
+
+    def forward():
+        if name == "gcn":
+            return model(graph.x, graph.edge_index)
+        return model(graph.x)
+
+    def synchronise():
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        elif device.type == "mps":
+            torch.mps.synchronize()
+
+    model.eval()
+
+    with torch.no_grad():
+        # Warm-up runs.
+        for _ in range(3):
+            forward()
+
+        synchronise()
+        timings = []
+
+        for _ in range(10):
+            synchronise()
+            start = time.perf_counter()
+            forward()
+            synchronise()
+            timings.append((time.perf_counter() - start) * 1000)
+
+    # macOS reports ru_maxrss in bytes.
+    # Linux reports it in kilobytes.
+    import sys
+    peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    divisor = 1024 ** 2 if sys.platform == "darwin" else 1024
+
+    result = {
+        "device": str(device),
+        "parameters": sum(p.numel() for p in model.parameters()),
+        "mean_inference_ms": float(np.mean(timings)),
+        "peak_process_rss_mb": float(peak_rss / divisor),
+    }
+
+    if device.type == "cuda":
+        result["cuda_peak_allocated_mb"] = (
+            torch.cuda.max_memory_allocated(device) / 1024 ** 2
+        )
+
+    elif device.type == "mps":
+        result["mps_current_allocated_mb"] = (
+            torch.mps.current_allocated_memory() / 1024 ** 2
+        )
+
+    print(f"\n{name.upper()} Resource Profile")
+    print(json.dumps(result, indent=2))
+
+    return result
+
+
+
+
 def main():
     device = torch.device("cpu")
     graph = load_facebook(seed=42).to(device)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    results = {}
 
     for name in ("mlp", "gcn"):
         model = load_model(name, graph, device)
         predictions, probabilities = predict(model, graph, name)
 
-        evaluate_classification(
+        # Evaluate classification performance on test nodes.
+        metrics = evaluate_classification(
             predictions, probabilities, graph, name
         )
 
-        # Analyse confidence only on held-out test nodes.
         test_probabilities = probabilities[
             graph.test_mask
         ].cpu().numpy()
@@ -274,13 +450,13 @@ def main():
             graph.test_mask
         ].cpu().numpy()
 
+        # Measure confidence calibration.
         ece = reliability_analysis(
             test_probabilities, test_labels, name
         )
-
         print(f"{name.upper()} Expected Calibration Error: {ece:.4f}")
 
-        # Select the confidence threshold on validation nodes.
+        # Select confidence threshold using validation nodes.
         val_probabilities = probabilities[
             graph.val_mask
         ].cpu().numpy()
@@ -295,7 +471,7 @@ def main():
 
         selected_threshold = val_result["threshold"]
 
-        # Apply the fixed validation threshold to test nodes.
+        # Evaluate the selected threshold on held-out test nodes.
         test_result, test_rows = rejection_analysis(
             test_probabilities,
             test_labels,
@@ -311,6 +487,34 @@ def main():
             f"accepted accuracy={test_result['accepted_accuracy']:.1%} | "
             f"referred={test_result['referred_nodes']}"
         )
+
+        # Analyse representative classification errors.
+        failures = analyse_failures(
+            predictions, probabilities, graph, name
+        )
+
+        # Visualise learned GCN representations.
+        if name == "gcn":
+            plot_embeddings(model, graph)
+
+        # Measure inference speed and memory usage.
+        profiling = profile_inference(
+            model, graph, name, device
+        )
+
+        # Store results for the final report.
+        results[name] = {
+            **metrics,
+            "ece": ece,
+            "rejection": test_result,
+            "failure_cases": failures,
+            "profiling": profiling,
+        }
+
+    with open(OUTPUT_DIR / "evaluation_results.json", "w") as f:
+        json.dump(results, f, indent=2)
+
+    print("\nEvaluation complete. Results saved to:", OUTPUT_DIR)
 
 
 if __name__ == "__main__":
