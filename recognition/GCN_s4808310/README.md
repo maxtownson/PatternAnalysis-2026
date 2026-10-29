@@ -834,3 +834,90 @@ The failure and embedding analyses support three conclusions:
 
 These findings support using the GCN as a classification assistant with human oversight rather than treating every prediction as automatically reliable.
 
+
+## 9. Computational Cost and Engineering Recommendation
+
+### 9.1 Computational Efficiency
+
+Classification performance alone is insufficient to determine whether the GCN is preferable to the MLP. The additional computational cost of processing graph connections must also be considered.
+
+Both models contain 302,020 trainable parameters, allowing their performance and computational requirements to be compared without differences in parameter count.
+
+Inference latency was measured using ten timed full-graph forward passes, following three warm-up passes.
+
+| Measurement | MLP | GCN |
+|---|---:|---:|
+| Parameters | 302,020 | 302,020 |
+| CPU inference latency | 19.63 ms | 55.55 ms |
+| MPS inference latency | 3.26 ms | 20.88 ms |
+| CPU process peak RSS | 904.19 MB | 1,116.41 MB |
+| Test accuracy | 89.01% | 94.57% |
+| Macro-F1 | 0.8837 | 0.9435 |
+
+The GCN requires approximately 2.83 times the CPU inference time of the MLP and approximately 6.40 times the MPS inference time in the recorded experiments.
+
+The additional cost is expected because graph convolution aggregates information across connected nodes, whereas the MLP applies linear transformations independently to node features.
+
+The CPU memory figures represent the process-wide peak resident memory observed during evaluation. They include the graph data, Python runtime and other allocated objects, and should not be interpreted as isolated model memory consumption.
+
+Similarly, these measurements do not establish peak GPU VRAM usage.
+
+### 9.2 Performance Versus Computational Cost
+
+Despite the additional computational requirements, the GCN achieves a substantial improvement in classification performance.
+
+Compared with the MLP, the GCN provides:
+
+- A 5.56 percentage-point increase in test accuracy.
+- An improvement in macro-F1 from 0.8837 to 0.9435.
+- An increase in macro-AUROC from 0.9788 to 0.9920.
+- Higher accepted-prediction accuracy at greater automatic classification coverage.
+- A reduction in referred test nodes from 1,476 to 410.
+
+The additional latency is therefore accompanied by a meaningful improvement in classification quality.
+
+For applications involving large numbers of Facebook pages, reducing the amount of manual classification required may justify the increased computational cost.
+
+However, the MLP remains attractive when graph connectivity is unavailable or inference speed is the primary operational constraint.
+
+### 9.3 Engineering Recommendation
+
+Based on the experimental results, the GCN is recommended over the MLP for a prototype Facebook page classification assistant when graph connections are available.
+
+The GCN achieves higher classification accuracy, stronger per-class performance and a more favourable confidence-based rejection trade-off.
+
+Using the validation-selected confidence threshold of 0.735, the GCN automatically classifies 90.9% of test pages with 97.2% accepted accuracy, referring the remaining 9.1% for human review.
+
+This provides a practical approach for reducing manual classification workload while retaining human oversight.
+
+Nevertheless, the model should not be treated as fully reliable.
+
+The failure-case analysis identifies several highly confident incorrect predictions, including cases where misleading neighbourhood composition may contribute to classification errors.
+
+Furthermore, the GCN's ECE of 0.0190 is slightly worse than the MLP's ECE of 0.0149, demonstrating that improved accuracy does not guarantee improved confidence calibration.
+
+### 9.4 Limitations and Future Work
+
+Several limitations should be addressed before operational deployment.
+
+**Dataset representation:** The implementation uses 4,714 raw binary features rather than the 128-dimensional representation described in the assessment specification. This limits direct comparability with implementations using the prescribed representation.
+
+**Evaluation robustness:** The experiments use one random seed and one train/validation/test split. Repeating experiments across multiple seeds would provide stronger evidence of performance stability.
+
+**Confidence calibration:** Although both models achieve low ECE, highly confident incorrect predictions remain. Temperature scaling or other calibration techniques could be investigated using validation data.
+
+**Graph dependence:** The GCN relies on the availability and quality of graph connections. Missing, misleading or changing connections may reduce classification performance.
+
+**Computational profiling:** The reported process memory measurements do not isolate peak GPU memory usage. More detailed profiling would be necessary for deployment planning.
+
+**Generalisation:** The experiment uses a transductive setting in which the full graph structure is available. Performance on entirely new, previously unseen nodes or graphs has not been established.
+
+### 9.5 Final Recommendation
+
+The GCN offers a worthwhile improvement over the feature-only MLP for the evaluated Facebook classification task.
+
+Although it requires more computational resources, its higher accuracy and substantially greater automatic classification coverage provide a clear operational advantage.
+
+The recommended next step is to retain the GCN as the preferred prototype, apply confidence-based referral for uncertain predictions, and investigate highly confident errors before considering deployment.
+
+The results support continued development and validation of the GCN rather than unrestricted automatic classification.
