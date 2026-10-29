@@ -214,3 +214,115 @@ The verification confirmed:
 - The expected training, validation and testing node counts.
 
 The graph is returned as a PyTorch Geometric `Data` object containing the node features, edges, labels and split masks.
+
+ 
+## 4. Model Architecture
+
+Two neural networks are implemented: a Graph Convolutional Network (GCN) and a Multi-Layer Perceptron (MLP). Both use two learnable layers, 64 hidden units, ReLU activation and dropout.
+
+The main difference is that the GCN incorporates graph connectivity, while the MLP classifies each node using only its own features.
+
+### 4.1 Graph Convolutional Network
+
+The GCN follows the graph convolution approach introduced by Kipf and Welling [1].
+
+Unlike a conventional fully connected layer, graph convolution aggregates information from neighbouring nodes. This allows a Facebook page's classification to depend on both its own descriptive features and the characteristics of connected pages.
+
+A graph convolutional layer is defined as:
+
+$$
+H^{(l+1)} = \sigma\left(
+\tilde{D}^{-1/2}
+\tilde{A}
+\tilde{D}^{-1/2}
+H^{(l)}W^{(l)}
+\right)
+$$
+
+where:
+
+- $A$ is the graph adjacency matrix.
+- $\tilde{A} = A + I$ adds self-loops.
+- $\tilde{D}$ is the degree matrix of $\tilde{A}$.
+- $H^{(l)}$ contains node representations at layer $l$.
+- $W^{(l)}$ is the learnable weight matrix.
+- $\sigma$ is the activation function.
+
+The implementation uses two `GCNConv` layers from PyTorch Geometric.
+
+The first layer transforms the 4,714-dimensional input features into 64 hidden features. ReLU activation and dropout are applied before the second layer produces four class scores.
+
+The two-layer architecture allows each node to incorporate information from its local graph neighbourhood, potentially including nodes up to two connections away.
+
+### 4.2 MLP Baseline
+
+A two-layer Multi-Layer Perceptron provides a feature-only baseline.
+
+The MLP applies two fully connected linear transformations with ReLU activation and dropout between them:
+
+$$
+H = \operatorname{Dropout}(\operatorname{ReLU}(XW_1+b_1))
+$$
+
+$$
+Z = HW_2+b_2
+$$
+
+The first layer maps 4,714 input features to 64 hidden units, while the second produces four class scores.
+
+Unlike the GCN, the MLP does not use `edge_index` or aggregate information from neighbouring nodes.
+
+This provides a direct comparison between feature-only classification and graph-based classification.
+
+### 4.3 Architecture Comparison
+
+| Property | MLP | GCN |
+|---|---|---|
+| Input features | 4,714 | 4,714 |
+| Hidden units | 64 | 64 |
+| Output classes | 4 | 4 |
+| Learnable layers | 2 linear | 2 graph convolution |
+| Activation | ReLU | ReLU |
+| Dropout | 0.5 | 0.5 |
+| Graph connectivity | Not used | Used |
+| Parameters | 302,020 | 302,020 |
+
+Both models have identical parameter counts, making the comparison particularly useful for assessing the contribution of graph structure.
+
+### 4.4 Classification Objective
+
+Both models produce four raw output scores, known as logits, for each node.
+
+During training, cross-entropy loss is used to compare these scores against the true training-node labels.
+
+The multiclass cross-entropy objective is:
+
+$$
+\mathcal{L} =
+-\frac{1}{N_{\mathrm{train}}}
+\sum_{i \in \mathcal{T}}
+\log
+\left(
+\frac{\exp(z_{i,y_i})}
+{\sum_{c=1}^{4}\exp(z_{i,c})}
+\right)
+$$
+
+where $\mathcal{T}$ is the training-node set and $z_{i,c}$ is the logit for class $c$ at node $i$.
+
+Only training-node labels contribute to this loss.
+
+During evaluation, softmax converts logits into predicted class probabilities. The highest probability determines the predicted category and is used as the model's confidence score.
+
+### 4.5 Implementation
+
+Both architectures are implemented in `modules.py` using PyTorch and PyTorch Geometric.
+
+The file defines two model classes:
+
+- `GCN`: Accepts node features and graph edges.
+- `MLP`: Accepts node features only.
+
+The model file also includes a small synthetic-graph smoke test that verifies both models produce outputs with the expected shape.
+
+For ten test nodes and four categories, both models successfully return a tensor of shape `[10, 4]`.
