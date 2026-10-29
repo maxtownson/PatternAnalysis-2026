@@ -111,3 +111,106 @@ If the raw features proved unsuitable, the proposed fallback was to obtain the p
 [2] Rozemberczki, B., Allen, C., & Sarkar, R. (2021). Multi-scale attributed node embedding. Journal of Complex Networks, 9(2). https://doi.org/10.1093/comnet/cnab014
 
 [3] UCI Machine Learning Repository. Facebook Large Page-Page Network. https://archive.ics.uci.edu/dataset/527/facebook+large+page+page+network
+
+
+## 3. Dataset and Preprocessing
+
+### 3.1 Dataset Description
+
+The project uses the Facebook Large Page-Page Network dataset from the UCI Machine Learning Repository [3]. Each node represents a Facebook page, while an edge represents a mutual like relationship between two pages.
+
+The dataset contains four page categories:
+
+- Company
+- Government
+- Politician
+- TV show
+
+The graph contains 22,470 nodes and 171,002 undirected edges. Each page also has a set of descriptive features, which are used alongside graph connectivity to predict its category.
+
+### 3.2 Feature Preprocessing
+
+The dataset is loaded from three files:
+
+- `musae_facebook_edges.csv`: Connections between Facebook pages.
+- `musae_facebook_target.csv`: Node IDs and their classification labels.
+- `musae_facebook_features.json`: Feature identifiers associated with each node.
+
+The original node IDs are mapped to consecutive tensor indices, ensuring that the feature matrix, labels and graph edges refer to the same nodes.
+
+A binary feature matrix is constructed with 4,714 columns. Each entry is set to 1 when a page contains the corresponding feature and 0 otherwise.
+
+This produces a node-feature matrix of shape:
+
+`[22470, 4714]`
+
+The four page categories are encoded as integer labels from 0 to 3.
+
+The assignment specification describes a 128-dimensional feature representation. However, this implementation uses the 4,714-dimensional raw features available in the UCI dataset, as identified in the feasibility review.
+
+No dimensionality reduction or feature normalisation is applied.
+
+### 3.3 Graph Construction
+
+The dataset represents an undirected Facebook network.
+
+After mapping the original node identifiers to tensor indices, each edge is stored in both directions so it can be processed by PyTorch Geometric.
+
+The resulting edge tensor has shape:
+
+`[2, 342004]`
+
+The first row contains source indices, while the second contains destination indices.
+
+This bidirectional representation allows information to propagate between connected pages during graph convolution.
+
+### 3.4 Training, Validation and Test Splits
+
+A fixed random seed of 42 is used to generate reproducible node splits.
+
+| Split | Percentage | Nodes |
+|---|---:|---:|
+| Training | 60% | 13,482 |
+| Validation | 20% | 4,494 |
+| Testing | 20% | 4,494 |
+| **Total** | **100%** | **22,470** |
+
+The splits are represented using Boolean masks:
+
+- `train_mask`
+- `val_mask`
+- `test_mask`
+
+These masks determine which nodes contribute to training, validation and final testing.
+
+Both the GCN and MLP use the same splits to ensure a fair comparison.
+
+### 3.5 Transductive Learning and Leakage Prevention
+
+The GCN operates in a transductive learning setting.
+
+The complete graph structure and node features are available during training, including the connections of validation and test nodes. However, only training-node labels are used to calculate the training loss.
+
+The training objective is therefore calculated using:
+
+`logits[train_mask]` and `y[train_mask]`
+
+Validation labels are used to monitor performance and select model checkpoints, while test labels are reserved for final evaluation.
+
+This prevents validation and test labels from directly contributing to gradient updates.
+
+The MLP baseline uses the same feature matrix and node splits but does not use graph edges, allowing the effect of neighbourhood information to be compared independently.
+
+### 3.6 Data Verification
+
+The data loader was tested successfully using `dataset.py`.
+
+The verification confirmed:
+
+- 22,470 nodes.
+- 342,004 directed edge entries.
+- 4,714 input features.
+- Four classification categories.
+- The expected training, validation and testing node counts.
+
+The graph is returned as a PyTorch Geometric `Data` object containing the node features, edges, labels and split masks.
