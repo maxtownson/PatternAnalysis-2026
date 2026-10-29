@@ -326,3 +326,119 @@ The file defines two model classes:
 The model file also includes a small synthetic-graph smoke test that verifies both models produce outputs with the expected shape.
 
 For ten test nodes and four categories, both models successfully return a tensor of shape `[10, 4]`.
+
+
+## 5. Training Methodology
+
+### 5.1 Experimental Setup
+
+Both the GCN and MLP were trained using the same Facebook dataset, node features and 60/20/20 train/validation/test split.
+
+The experiments were implemented in PyTorch and PyTorch Geometric, with training performed locally using Apple MPS acceleration.
+
+The same random seed, model dimensions, optimiser and training configuration were used for both models to support a consistent comparison.
+
+### 5.2 Training Hyperparameters
+
+The following configuration was used for both models:
+
+| Hyperparameter | Value |
+|---|---|
+| Optimiser | Adam |
+| Learning rate | 0.01 |
+| Weight decay | 0.0005 |
+| Maximum epochs | 100 |
+| Early stopping patience | 20 epochs |
+| Hidden units | 64 |
+| Dropout probability | 0.5 |
+| Loss function | Cross-entropy |
+| Random seed | 42 |
+| Training device | Apple MPS |
+| Model selection | Lowest validation loss |
+
+Both models use full-graph inference during training. For the GCN, graph convolution operates over the complete network, while the loss is calculated only for nodes belonging to the training split.
+
+The MLP processes the same node features without using graph connectivity.
+
+### 5.3 Training and Validation Procedure
+
+Training is implemented in `train.py`.
+
+For each epoch, the following procedure is performed:
+
+1. Set the model to training mode.
+2. Perform a forward pass to calculate node-level class logits.
+3. Calculate cross-entropy loss using training-node labels only.
+4. Backpropagate the loss and update model parameters using Adam.
+5. Switch to evaluation mode and calculate validation loss, accuracy and macro-F1.
+6. Record the training and validation metrics for later visualisation.
+
+The validation set is used to monitor generalisation performance and determine which model checkpoint should be retained.
+
+The test set is not used to calculate gradients or select the best model.
+
+### 5.4 Early Stopping and Checkpoint Selection
+
+Early stopping is implemented to reduce unnecessary training once validation loss stops improving.
+
+A model checkpoint is retained whenever validation loss improves by at least 0.0001.
+
+If the validation loss fails to improve sufficiently for 20 consecutive epochs, training stops.
+
+The saved checkpoint corresponds to the epoch with the lowest qualifying validation loss, rather than automatically using the final epoch.
+
+After training, the best checkpoint is restored and evaluated on the held-out test split.
+
+The model weights are saved locally as:
+
+- `outputs/mlp_best.pt`
+- `outputs/gcn_best.pt`
+
+These checkpoint files are excluded from Git because the assignment prohibits committing trained model weights.
+
+### 5.5 Training Curves
+
+Training loss, validation loss, validation accuracy and validation macro-F1 are recorded during training.
+
+The resulting curves are shown below.
+
+**MLP training performance:**
+
+![MLP training curves](figures/mlp_training.png)
+
+**GCN training performance:**
+
+![GCN training curves](figures/gcn_training.png)
+
+Both models show substantial improvements in training and validation performance over the 100-epoch experiment.
+
+For the MLP, training loss decreases from approximately 1.40 to 0.16, while validation loss stabilises around 0.34.
+
+For the GCN, training loss decreases from approximately 1.39 to 0.15, while validation loss decreases to approximately 0.20.
+
+The GCN achieves a lower validation loss and higher validation macro-F1 than the MLP.
+
+The difference between training and validation loss suggests some degree of overfitting, particularly for the MLP. However, both models maintain strong performance on the held-out test set.
+
+Neither model triggered early stopping before reaching the maximum of 100 epochs.
+
+### 5.6 Reproducibility
+
+A fixed random seed of 42 is used for dataset splitting and model training.
+
+The implementation sets seeds for Python, NumPy and PyTorch, and both models use identical training and evaluation masks.
+
+The training script supports configuration through command-line arguments, including the number of epochs, learning rate, patience, random seed and computing device.
+
+The completed experiment can be reproduced from the repository root using:
+
+```bash
+python recognition/GCN_s4808310/train.py --epochs 100 --patience 20
+```
+
+The script automatically selects CUDA, Apple MPS or CPU depending on availability.
+
+Training results, model checkpoints and training curves are written to the local `outputs/` directory.
+
+Exact numerical reproducibility may vary slightly between hardware backends, but the fixed splits and recorded configuration allow the experiment to be repeated consistently.
+
