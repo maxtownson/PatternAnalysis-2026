@@ -181,6 +181,21 @@ def main():
             predictions, probabilities, graph, name
         )
 
+        # Analyse confidence only on held-out test nodes.
+        test_probabilities = probabilities[
+            graph.test_mask
+        ].cpu().numpy()
+
+        test_labels = graph.y[
+            graph.test_mask
+        ].cpu().numpy()
+
+        ece = reliability_analysis(
+            test_probabilities, test_labels, name
+        )
+
+        print(f"{name.upper()} Expected Calibration Error: {ece:.4f}")
+
 
 if __name__ == "__main__":
     main()
