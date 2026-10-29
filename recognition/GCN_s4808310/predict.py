@@ -167,6 +167,90 @@ def reliability_analysis(probabilities, labels, name):
     return float(ece)
 
 
+def rejection_analysis(probabilities, labels, name, threshold=None):
+    """Calculate accuracy and coverage for confidence thresholds."""
+
+    predictions = probabilities.argmax(axis=1)
+    confidence = probabilities.max(axis=1)
+    correct = predictions == labels
+
+    rows = []
+
+    for t in np.linspace(0.0, 1.0, 201):
+        accepted = confidence >= t
+
+        coverage = float(accepted.mean())
+        accepted_accuracy = (
+            float(correct[accepted].mean())
+            if accepted.any() else None
+        )
+
+        rows.append({
+            "threshold": float(t),
+            "coverage": coverage,
+            "accuracy": accepted_accuracy,
+        })
+
+    if threshold is None:
+        # Choose the highest-coverage validation threshold
+        # that achieves at least 97% accepted accuracy.
+        eligible = [
+            row for row in rows
+            if row["accuracy"] is not None
+            and row["accuracy"] >= 0.97
+            and row["coverage"] > 0
+        ]
+
+        if not eligible:
+            raise ValueError(
+                f"{name}: No validation threshold achieves 97% accuracy"
+            )
+
+        threshold = max(eligible, key=lambda row: row["coverage"])[
+            "threshold"
+        ]
+
+    accepted = confidence >= threshold
+
+    result = {
+        "threshold": float(threshold),
+        "coverage": float(accepted.mean()),
+        "accepted_accuracy": (
+            float(correct[accepted].mean())
+            if accepted.any() else None
+        ),
+        "referred_nodes": int((~accepted).sum()),
+        "total_nodes": len(labels),
+    }
+
+    return result, rows
+
+
+def plot_rejection(rows, name):
+    """Plot the trade-off between coverage and accepted accuracy."""
+
+    valid = [r for r in rows if r["accuracy"] is not None]
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.plot(
+        [r["coverage"] for r in valid],
+        [r["accuracy"] for r in valid],
+        marker=".",
+        markersize=3
+    )
+
+    ax.set_xlabel("Coverage (fraction automatically classified)")
+    ax.set_ylabel("Accuracy among accepted predictions")
+    ax.set_title(f"{name.upper()} Coverage–Accuracy Trade-off")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR / f"{name}_rejection.png", dpi=150)
+    plt.close(fig)
+
+
+
 def main():
     device = torch.device("cpu")
     graph = load_facebook(seed=42).to(device)
@@ -195,6 +279,38 @@ def main():
         )
 
         print(f"{name.upper()} Expected Calibration Error: {ece:.4f}")
+
+        # Select the confidence threshold on validation nodes.
+        val_probabilities = probabilities[
+            graph.val_mask
+        ].cpu().numpy()
+
+        val_labels = graph.y[
+            graph.val_mask
+        ].cpu().numpy()
+
+        val_result, _ = rejection_analysis(
+            val_probabilities, val_labels, name
+        )
+
+        selected_threshold = val_result["threshold"]
+
+        # Apply the fixed validation threshold to test nodes.
+        test_result, test_rows = rejection_analysis(
+            test_probabilities,
+            test_labels,
+            name,
+            threshold=selected_threshold
+        )
+
+        plot_rejection(test_rows, name)
+
+        print(
+            f"{name.upper()} threshold={selected_threshold:.3f} | "
+            f"coverage={test_result['coverage']:.1%} | "
+            f"accepted accuracy={test_result['accepted_accuracy']:.1%} | "
+            f"referred={test_result['referred_nodes']}"
+        )
 
 
 if __name__ == "__main__":
