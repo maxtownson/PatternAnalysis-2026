@@ -668,3 +668,169 @@ Nevertheless, several limitations remain:
 The confidence threshold is therefore best interpreted as a prototype decision rule rather than a guaranteed reliability constraint.
 
 Overall, the GCN provides a stronger basis for automated Facebook page classification with selective human review, while the remaining high-confidence errors require further investigation.
+
+
+## 8. Misclassification Analysis and Learned Embeddings
+
+### 8.1 Failure Analysis Methodology
+
+Although the GCN achieves 94.57% test accuracy, some Facebook pages remain incorrectly classified.
+
+To investigate these errors, five misclassified test nodes were selected based on prediction confidence:
+
+- Three high-confidence incorrect predictions.
+- Two lower-confidence incorrect predictions.
+
+For each node, the analysis records its true category, predicted category, confidence score and number of graph neighbours.
+
+Neighbourhood label distributions are also examined as a post-training diagnostic to investigate whether connected pages may contribute to classification errors.
+
+These neighbouring labels are used only for error analysis and are not supplied to the model during training or inference.
+
+### 8.2 Representative GCN Failure Cases
+
+The following five examples were extracted from the held-out test set.
+
+| Node | True Class | Predicted Class | Confidence | Neighbours |
+|---|---|---|---:|---:|
+| 9077 | Government | Company | 1.0000 | 20 |
+| 9254 | Company | TV show | 1.0000 | 16 |
+| 9603 | Government | Politician | 0.9998 | 148 |
+| 6241 | Government | TV show | 0.3677 | 4 |
+| 17895 | Company | Politician | 0.3487 | 3 |
+
+The first three cases demonstrate that the GCN can produce extremely confident incorrect predictions.
+
+The final two cases represent ambiguous predictions, where confidence is substantially lower.
+
+These examples illustrate two distinct failure modes: incorrect predictions reinforced by misleading graph context, and uncertain predictions where the model does not strongly favour any individual class.
+
+### 8.3 High-Confidence Errors
+
+**Case 1 — Node 9077: Government classified as Company**
+
+Node 9077 is a government page incorrectly classified as a company with approximately 100% confidence.
+
+Of its 20 neighbours:
+
+- 17 are company pages.
+- 3 are government pages.
+
+The strong concentration of company neighbours provides a plausible explanation for the incorrect prediction.
+
+Because graph convolution aggregates information from connected nodes, the surrounding company pages may cause the node representation to resemble that of a company.
+
+This illustrates a potential weakness of graph-based classification when a node's neighbours predominantly belong to a different category.
+
+**Case 2 — Node 9254: Company classified as TV show**
+
+Node 9254 is a company page incorrectly classified as a TV show with approximately 100% confidence.
+
+Its neighbourhood contains 16 connected pages:
+
+- 15 TV show pages.
+- 1 company page.
+
+The model's prediction agrees with the dominant neighbouring category rather than the node's true category.
+
+This is another example where local graph structure may reinforce an incorrect classification.
+
+**Case 3 — Node 9603: Government classified as Politician**
+
+Node 9603 is a government page incorrectly classified as a politician with 99.98% confidence.
+
+It has 148 neighbours:
+
+- 97 politician pages.
+- 47 government pages.
+- 3 TV show pages.
+- 1 company page.
+
+Politician pages account for approximately 65.5% of its neighbourhood.
+
+This case is particularly interesting because government and politician pages can have closely related graph connections.
+
+The model may therefore struggle to distinguish between the two categories when neighbourhood composition strongly favours politicians.
+
+Unlike an isolated low-degree node, this error occurs in a relatively well-connected part of the graph, demonstrating that additional connectivity does not always guarantee correct classification.
+
+### 8.4 Low-Confidence Errors
+
+**Case 4 — Node 6241: Government classified as TV show**
+
+Node 6241 is a government page incorrectly classified as a TV show with confidence 0.3677.
+
+The node has only four neighbours.
+
+Unlike the high-confidence cases, the model does not assign a dominant probability to its selected category.
+
+This suggests greater uncertainty in the available classification evidence.
+
+**Case 5 — Node 17895: Company classified as Politician**
+
+Node 17895 is a company page incorrectly classified as a politician with confidence 0.3487.
+
+The node has three neighbours.
+
+Its low confidence suggests that the model finds the classification ambiguous.
+
+These examples are consistent with the possibility that limited connectivity provides less useful neighbourhood context. However, further investigation of their node features and neighbour categories would be needed to establish the precise cause.
+
+### 8.5 Failure Analysis Interpretation
+
+The five cases reveal two important limitations.
+
+First, graph convolution can propagate misleading information when neighbouring pages predominantly belong to an incorrect category.
+
+This is evident in nodes 9077, 9254 and 9603, where the predicted category corresponds to the dominant neighbourhood category.
+
+Second, low-confidence predictions remain difficult to classify reliably.
+
+The confidence-based rejection policy introduced in Section 7 can identify uncertain predictions for human review.
+
+However, the rejection policy cannot guarantee that all incorrect predictions are detected.
+
+Highly confident errors may still be automatically accepted, demonstrating why aggregate accuracy and calibration metrics are insufficient for fully assessing reliability.
+
+### 8.6 Learned Node Embeddings
+
+To investigate the representations learned by the GCN, a two-dimensional t-SNE visualisation was generated from the hidden activations of the first graph convolution layer.
+
+The procedure was:
+
+1. Load the trained GCN checkpoint.
+2. Extract the 64-dimensional hidden node representations after the first graph convolution and ReLU activation.
+3. Randomly sample 2,000 nodes using a fixed seed of 42.
+4. Apply t-SNE with perplexity 30.
+5. Colour each projected node according to its ground-truth category.
+
+The resulting visualisation is shown below.
+
+![GCN learned node embeddings](figures/gcn_tsne.png)
+
+### 8.7 Embedding Interpretation
+
+The t-SNE visualisation shows that the learned representations form several distinguishable regions associated with the four Facebook page categories.
+
+This indicates that the GCN learns features that help separate company, government, politician and TV show pages.
+
+However, the classes are not perfectly separated.
+
+Some regions contain overlapping categories, suggesting that pages can share similar learned representations despite having different ground-truth labels.
+
+This is consistent with the observed misclassifications, particularly between government and politician pages.
+
+The t-SNE plot provides a qualitative view of the learned feature space rather than a quantitative measure of classification performance.
+
+Because t-SNE is a nonlinear dimensionality-reduction technique, distances between projected clusters should not be interpreted as exact distances in the original 64-dimensional representation.
+
+### 8.8 Key Findings
+
+The failure and embedding analyses support three conclusions:
+
+1. Graph connectivity provides useful information for classification but can also reinforce misleading neighbourhood patterns.
+2. High prediction confidence does not guarantee correctness, even when overall calibration error is low.
+3. Learned graph representations separate many page categories effectively, but ambiguity remains between some classes.
+
+These findings support using the GCN as a classification assistant with human oversight rather than treating every prediction as automatically reliable.
+
