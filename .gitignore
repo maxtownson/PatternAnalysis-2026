@@ -17,3 +17,6 @@ data/
 # Local documents
 *.docx
 ~$*
+
+.DS_Store
+recognition/GCN_s4808310/outputs/
