@@ -17,6 +17,7 @@ from sklearn.metrics import (
     f1_score,
     roc_auc_score,
 )
+import argparse
 
 from dataset import load_facebook
 from modules import GCN, MLP
@@ -380,42 +381,71 @@ def profile_inference(model, graph, name, device):
 
     model.eval()
 
-    with torch.no_grad():
-        # Warm-up runs.
-        for _ in range(3):
-            forward()
+    def allocated_mb():
+        if device.type == "mps":
+            return torch.mps.current_allocated_memory() / 1024**2
+        if device.type == "cuda":
+            return torch.cuda.memory_allocated(device) / 1024**2
+        return None
 
-        synchronise()
+    synchronise()
+    baseline_mb = allocated_mb()
+
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+
+    with torch.inference_mode():
+        for _ in range(3):
+            output = forward()
+            synchronise()
+            del output
+
         timings = []
+        observed_allocations = []
 
         for _ in range(10):
             synchronise()
             start = time.perf_counter()
-            forward()
-            synchronise()
-            timings.append((time.perf_counter() - start) * 1000)
 
-    # macOS reports ru_maxrss in bytes.
-    # Linux reports it in kilobytes.
-    import sys
-    peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    divisor = 1024 ** 2 if sys.platform == "darwin" else 1024
+            output = forward()
+            synchronise()
+
+            timings.append(
+                (time.perf_counter() - start) * 1000
+            )
+
+            # Observe memory while output is still alive.
+            memory = allocated_mb()
+            if memory is not None:
+                observed_allocations.append(memory)
+
+            del output
+
+    synchronise()
 
     result = {
         "device": str(device),
-        "parameters": sum(p.numel() for p in model.parameters()),
+        "parameters": sum(
+            p.numel() for p in model.parameters()
+        ),
         "mean_inference_ms": float(np.mean(timings)),
-        "peak_process_rss_mb": float(peak_rss / divisor),
     }
 
     if device.type == "cuda":
         result["cuda_peak_allocated_mb"] = (
-            torch.cuda.max_memory_allocated(device) / 1024 ** 2
+            torch.cuda.max_memory_allocated(device) / 1024**2
         )
 
     elif device.type == "mps":
-        result["mps_current_allocated_mb"] = (
-            torch.mps.current_allocated_memory() / 1024 ** 2
+        maximum = max(observed_allocations)
+
+        result["mps_baseline_allocated_mb"] = baseline_mb
+        result["mps_max_observed_allocated_mb"] = maximum
+        result["mps_observed_increase_mb"] = (
+            maximum - baseline_mb
+        )
+        result["mps_driver_allocated_mb"] = (
+            torch.mps.driver_allocated_memory() / 1024**2
         )
 
     print(f"\n{name.upper()} Resource Profile")
@@ -426,14 +456,41 @@ def profile_inference(model, graph, name, device):
 
 
 
+
 def main():
-    device = torch.device("cpu")
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--device",
+        choices=["cpu", "mps", "cuda"],
+        default="cpu",
+        help="Device used for inference and evaluation",
+    )
+    parser.add_argument(
+        "--model",
+        choices=["mlp", "gcn", "both"],
+        default="both",
+        help="Select which model to evaluate",
+    )
+    args = parser.parse_args()
+
+    device = torch.device(args.device)
+
+    if device.type == "mps" and not torch.backends.mps.is_available():
+        parser.error("MPS is not available")
+
+    if device.type == "cuda" and not torch.cuda.is_available():
+        parser.error("CUDA is not available")
+
+    print(f"Evaluation device: {device}")
     graph = load_facebook(seed=42).to(device)
+    
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     results = {}
 
-    for name in ("mlp", "gcn"):
+    models = ("mlp", "gcn") if args.model == "both" else (args.model,)
+
+    for name in models:
         model = load_model(name, graph, device)
         predictions, probabilities = predict(model, graph, name)
 
