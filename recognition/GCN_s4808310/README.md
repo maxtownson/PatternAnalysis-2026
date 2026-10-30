@@ -515,9 +515,6 @@ The performance improvement is consistent with graph homophily: connected Facebo
 
 Nevertheless, higher classification accuracy does not automatically imply that the GCN produces better-calibrated confidence estimates.
 
-The next section investigates whether model confidence corresponds to correctness and whether uncertain predictions can be referred for human review.
-
-
 ## 7. Confidence and Rejection Analysis
 
 ### 7.1 Confidence and Prediction Reliability
