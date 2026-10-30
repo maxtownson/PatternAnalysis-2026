@@ -921,3 +921,180 @@ Although it requires more computational resources, its higher accuracy and subst
 The recommended next step is to retain the GCN as the preferred prototype, apply confidence-based referral for uncertain predictions, and investigate highly confident errors before considering deployment.
 
 The results support continued development and validation of the GCN rather than unrestricted automatic classification.
+
+
+## 10. Reproducibility and Usage
+
+### 10.1 Software Dependencies
+
+The implementation uses Python 3.12 and the following libraries:
+
+- PyTorch: Neural network implementation, training and inference.
+- PyTorch Geometric: Graph representation and graph convolution layers.
+- NumPy: Numerical processing and evaluation.
+- Pandas: Loading the Facebook dataset.
+- Scikit-learn: Classification metrics, calibration analysis and t-SNE.
+- Matplotlib: Training curves and evaluation visualisations.
+
+The exact package versions used for the experiments are recorded in `recognition/requirements.txt`.
+
+Training was performed locally on macOS using Apple MPS acceleration. The evaluation scripts also support CPU execution.
+
+### 10.2 Installation
+
+Clone the PatternAnalysis-2026 repository and navigate to the repository root.
+
+Create a Python virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install the required dependencies:
+
+```bash
+python -m pip install -r recognition/requirements.txt
+```
+
+### 10.3 Dataset Preparation
+
+Download the Facebook Large Page-Page Network dataset from the UCI Machine Learning Repository:
+
+https://archive.ics.uci.edu/dataset/527/facebook+large+page+page+network
+
+Extract the following files into:
+
+`data/facebook_uci/facebook_large/`
+
+Required files:
+
+- `musae_facebook_edges.csv`
+- `musae_facebook_target.csv`
+- `musae_facebook_features.json`
+
+The dataset is not included in the repository because the assessment prohibits committing dataset files.
+
+### 10.4 Running the Data Loader
+
+From the repository root:
+
+```bash
+python recognition/GCN_s4808310/dataset.py
+```
+
+The expected output confirms:
+
+- 22,470 nodes.
+- 342,004 bidirectional edge entries.
+- 4,714 node features.
+- Four classification categories.
+- Training, validation and testing node counts of 13,482, 4,494 and 4,494.
+
+### 10.5 Running Model Tests
+
+To verify the GCN and MLP architectures:
+
+```bash
+python recognition/GCN_s4808310/modules.py
+```
+
+Both models should produce output tensors with four class scores per node.
+
+The smoke test also verifies that both architectures contain 302,020 trainable parameters.
+
+### 10.6 Training the Models
+
+To reproduce the training experiment:
+
+```bash
+python recognition/GCN_s4808310/train.py --epochs 100 --patience 20
+```
+
+The training script:
+
+1. Loads the Facebook graph.
+2. Creates reproducible data splits using seed 42.
+3. Trains the MLP and GCN independently.
+4. Monitors validation loss, accuracy and macro-F1.
+5. Saves the best validation-selected checkpoints.
+6. Generates training curves and a JSON file containing experiment results.
+
+Outputs are saved to:
+
+`recognition/GCN_s4808310/outputs/`
+
+### 10.7 Evaluating the Models
+
+After training, run:
+
+```bash
+python recognition/GCN_s4808310/predict.py
+```
+
+The evaluation script loads the saved checkpoints and produces:
+
+- Accuracy, macro-F1, precision, recall and AUROC.
+- Confusion matrices.
+- Expected Calibration Error and reliability diagrams.
+- Validation-selected confidence rejection thresholds.
+- Coverage and accepted-prediction accuracy.
+- Representative misclassification examples.
+- GCN t-SNE embedding visualisation.
+- Inference latency, parameter count and available memory measurements.
+
+The numerical results are saved to `evaluation_results.json`.
+
+Saved checkpoints and generated evaluation outputs are excluded from Git. Selected figures used in this README are stored in the `figures/` directory.
+
+### 10.8 Reproducibility Considerations
+
+The experiments use a fixed random seed of 42 for Python, NumPy and PyTorch.
+
+Both models use identical training, validation and testing node masks, and their checkpoints are selected using validation loss.
+
+The reported results correspond to a single experimental configuration and dataset split.
+
+Small numerical differences may occur when reproducing the experiments on different hardware or software versions.
+
+The implementation uses transductive graph learning: validation and test node features and graph connections are available during training, but their labels do not contribute to the optimisation loss.
+
+---
+
+## 11. Artificial Intelligence Usage Disclosure
+
+Generative AI assistance was used in a supporting role during this project. The code, experiments and README were primarily my own work.
+
+OpenAI ChatGPT was used to assist with:
+- Writing and refining parts of the Python implementation (data loading, model architecture, training and evaluation), most of which I wrote myself with AI suggestions.
+- Debugging and reviewing code
+- Developing model evaluation procedures, including classification metrics, confidence analysis, rejection thresholds and visualisations.
+- Planning the structure of the written report and drafting some of its explanations.
+
+I wrote the bulk of the technical README myself.
+
+All code and results were reviewed and validated by me through execution and testing, including:
+
+- Verifying dataset dimensions, labels, graph edges and split sizes.
+- Running model smoke tests and checking output dimensions.
+- Training both models and examining their reported performance.
+- Comparing evaluation metrics against independently executed training results.
+- Checking confidence thresholds, failure cases and resource measurements.
+- Confirming the mathematical correctness of the methods and metrics used.
+- Reviewing the experimental results and their interpretation.
+
+The submitted implementation and experimental claims remain my responsibility. The report describes results obtained from actual executions of the project code rather than fabricated or assumed model outputs.
+
+---
+
+## 12. References
+
+[1] Kipf, T. N., & Welling, M. (2017). Semi-Supervised Classification with Graph Convolutional Networks. *International Conference on Learning Representations (ICLR)*. https://arxiv.org/abs/1609.02907
+
+[2] Rozemberczki, B., Allen, C., & Sarkar, R. (2021). Multi-scale attributed node embedding. *Journal of Complex Networks, 9*(2). https://doi.org/10.1093/comnet/cnab014
+
+[3] UCI Machine Learning Repository. Facebook Large Page-Page Network. https://archive.ics.uci.edu/dataset/527/facebook+large+page+page+network
+
+[4] Paszke, A., et al. (2019). PyTorch: An Imperative Style, High-Performance Deep Learning Library. *Advances in Neural Information Processing Systems, 32*. https://arxiv.org/abs/1912.01703
+
+[5] Fey, M., & Lenssen, J. E. (2019). Fast Graph Representation Learning with PyTorch Geometric. *ICLR Workshop on Representation Learning on Graphs and Manifolds*. https://arxiv.org/abs/1903.02428
