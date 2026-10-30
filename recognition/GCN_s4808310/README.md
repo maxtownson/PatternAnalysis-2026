@@ -260,13 +260,13 @@ A two-layer Multi-Layer Perceptron provides a feature-only baseline.
 
 The MLP applies two fully connected linear transformations with ReLU activation and dropout between them:
 
-$$
-H = \operatorname{Dropout}(\operatorname{ReLU}(XW_1+b_1))
-$$
+```math
+H = \mathrm{Dropout}\left(\mathrm{ReLU}(XW_1+b_1)\right)
+```
 
-$$
+```math
 Z = HW_2+b_2
-$$
+```
 
 The first layer maps 4,714 input features to 64 hidden units, while the second produces four class scores.
 
@@ -537,24 +537,18 @@ Predictions are divided into ten equally spaced confidence intervals. Within eac
 
 ECE is calculated as:
 
-$$
-\mathrm{ECE} =
-\sum_{b=1}^{B}
-\frac{|S_b|}{N}
-\left|
-\operatorname{accuracy}(S_b)
--
-\operatorname{confidence}(S_b)
-\right|
-$$
+```math
+\mathrm{ECE} = \sum_{b=1}^{B} \frac{|S_b|}{N}
+\left| \mathrm{acc}(S_b) - \mathrm{conf}(S_b) \right|
+```
 
 where:
 
 - $B$ is the number of confidence bins.
 - $S_b$ contains predictions assigned to bin $b$.
 - $N$ is the total number of predictions.
-- $\operatorname{accuracy}(S_b)$ is the fraction of correct predictions in bin $b$.
-- $\operatorname{confidence}(S_b)$ is the average confidence within that bin.
+- $\mathrm{acc}(S_b)$ is the fraction of correct predictions in bin $b$.
+- $\mathrm{conf}(S_b)$ is the average predicted confidence within bin $b$.
 
 Lower ECE indicates better agreement between confidence and observed correctness.
 
