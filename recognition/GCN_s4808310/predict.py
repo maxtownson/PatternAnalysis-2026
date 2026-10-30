@@ -486,6 +486,7 @@ def main():
     
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    prediction_cache = {}
     results = {}
 
     models = ("mlp", "gcn") if args.model == "both" else (args.model,)
@@ -493,6 +494,11 @@ def main():
     for name in models:
         model = load_model(name, graph, device)
         predictions, probabilities = predict(model, graph, name)
+
+        prediction_cache[name] = {
+            "predictions": predictions.detach().cpu(),
+            "probabilities": probabilities.detach().cpu(),
+        }
 
         # Evaluate classification performance on test nodes.
         metrics = evaluate_classification(
@@ -567,6 +573,57 @@ def main():
             "failure_cases": failures,
             "profiling": profiling,
         }
+
+
+    # Compare both models on the same representative GCN failures.
+    if "mlp" in prediction_cache and "gcn" in prediction_cache:
+        comparison = []
+
+        for case in results["gcn"]["failure_cases"]:
+            node = case["node_index"]
+
+            row = {
+                **case,
+                "models": {},
+            }
+
+            for model_name in ("mlp", "gcn"):
+                cached = prediction_cache[model_name]
+                predicted_id = int(cached["predictions"][node])
+                confidence = float(
+                    cached["probabilities"][node].max()
+                )
+
+                row["models"][model_name] = {
+                    "predicted_class": CLASS_NAMES[predicted_id],
+                    "confidence": round(confidence, 4),
+                    "correct": (
+                        predicted_id == int(graph.y[node].item())
+                    ),
+                }
+
+            comparison.append(row)
+
+        with open(
+            OUTPUT_DIR / "model_failure_comparison.json", "w"
+        ) as f:
+            json.dump(comparison, f, indent=2)
+
+        print("\nGCN versus MLP Failure Comparison")
+
+        for row in comparison:
+            mlp = row["models"]["mlp"]
+            gcn = row["models"]["gcn"]
+
+            print(
+                f"Node {row['node_index']}: "
+                f"True={row['true_class']} | "
+                f"MLP={mlp['predicted_class']} "
+                f"({mlp['confidence']:.4f}) | "
+                f"GCN={gcn['predicted_class']} "
+                f"({gcn['confidence']:.4f})"
+            )
+
 
     with open(OUTPUT_DIR / "evaluation_results.json", "w") as f:
         json.dump(results, f, indent=2)

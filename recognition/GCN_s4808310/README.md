@@ -146,7 +146,7 @@ This produces a node-feature matrix of shape:
 
 The four page categories are encoded as integer labels from 0 to 3.
 
-The assignment specification describes a 128-dimensional feature representation. However, this implementation uses the 4,714-dimensional raw features available in the UCI dataset, as identified in the feasibility review.
+The assignment specification describes a 128-dimensional feature representation. This project instead uses the 4,714-dimensional raw binary features from the UCI dataset, as approved during the feasibility process.
 
 No dimensionality reduction or feature normalisation is applied.
 
@@ -687,110 +687,94 @@ Neighbourhood label distributions are also examined as a post-training diagnosti
 
 These neighbouring labels are used only for error analysis and are not supplied to the model during training or inference.
 
-### 8.2 Representative GCN Failure Cases
 
-The following five examples were extracted from the held-out test set.
+### 8.2 Representative Failure Cases: GCN Versus MLP
 
-| Node | True Class | Predicted Class | Confidence | Neighbours |
-|---|---|---|---:|---:|
-| 9077 | Government | Company | 1.0000 | 20 |
-| 9254 | Company | TV show | 1.0000 | 16 |
-| 9603 | Government | Politician | 0.9998 | 148 |
-| 6241 | Government | TV show | 0.3677 | 4 |
-| 17895 | Company | Politician | 0.3487 | 3 |
+Five misclassified GCN test nodes were selected for qualitative analysis: three high-confidence errors and two lower-confidence errors.
 
-The first three cases demonstrate that the GCN can produce extremely confident incorrect predictions.
+To distinguish errors potentially associated with graph aggregation from those arising in feature-only classification, predictions from the trained MLP baseline were also examined for the same five nodes.
 
-The final two cases represent ambiguous predictions, where confidence is substantially lower.
+| Node | True Class | MLP Prediction (Confidence) | GCN Prediction (Confidence) | Neighbours |
+|---|---|---|---|---:|
+| 9077 | Government | Company (0.9091) | Company (1.0000) | 20 |
+| 9254 | Company | TV show (0.9879) | TV show (1.0000) | 16 |
+| 9603 | Government | **Government (0.9089)** | Politician (0.9998) | 148 |
+| 6241 | Government | Politician (0.9615) | TV show (0.3677) | 4 |
+| 17895 | Company | **Company (0.6240)** | Politician (0.3487) | 3 |
 
-These examples illustrate two distinct failure modes: incorrect predictions reinforced by misleading graph context, and uncertain predictions where the model does not strongly favour any individual class.
+The results distinguish three behaviours: errors shared by both models, cases where the GCN incorrectly changes an otherwise correct MLP prediction, and cases where the GCN expresses substantially less confidence in an incorrect prediction.
 
 ### 8.3 High-Confidence Errors
 
-**Case 1 — Node 9077: Government classified as Company**
+**Case 1 — Node 9077: Government misclassified as Company**
 
-Node 9077 is a government page incorrectly classified as a company with approximately 100% confidence.
+Both models incorrectly predict company. The MLP assigns 90.91% confidence, while the GCN assigns approximately 100%.
 
-Of its 20 neighbours:
+Of the node's 20 immediate neighbours, 17 (85%) are company pages and three (15%) are government pages.
 
-- 17 are company pages.
-- 3 are government pages.
+This neighbourhood composition is consistent with the GCN reinforcing an incorrect company classification. However, because the MLP also makes the same error without graph information, the node's own features may already be misleading. The graph may amplify an existing error rather than introduce it.
 
-The strong concentration of company neighbours provides a plausible explanation for the incorrect prediction.
+**Case 2 — Node 9254: Company misclassified as TV Show**
 
-Because graph convolution aggregates information from connected nodes, the surrounding company pages may cause the node representation to resemble that of a company.
+Both models incorrectly classify this company page as a TV show, with confidence increasing from 98.79% for the MLP to approximately 100% for the GCN.
 
-This illustrates a potential weakness of graph-based classification when a node's neighbours predominantly belong to a different category.
+Fifteen of its 16 neighbours (93.75%) are TV show pages, while only one is a company page.
 
-**Case 2 — Node 9254: Company classified as TV show**
+The model predictions agree with the dominant neighbouring category. Nevertheless, the MLP's incorrect prediction indicates that the error cannot be attributed exclusively to graph aggregation.
 
-Node 9254 is a company page incorrectly classified as a TV show with approximately 100% confidence.
+**Case 3 — Node 9603: Government misclassified as Politician**
 
-Its neighbourhood contains 16 connected pages:
+This case provides particularly useful evidence of a potential disadvantage of graph-based aggregation.
 
-- 15 TV show pages.
-- 1 company page.
+The MLP correctly predicts government with 90.89% confidence. The GCN instead predicts politician with 99.98% confidence.
 
-The model's prediction agrees with the dominant neighbouring category rather than the node's true category.
+Among the node's 148 neighbours, 97 (65.54%) are politician pages, 47 (31.76%) are government pages, three are TV show pages and one is a company page.
 
-This is another example where local graph structure may reinforce an incorrect classification.
+The change from a correct feature-only prediction to an incorrect, highly confident graph-based prediction is consistent with misleading neighbourhood information contributing to classification failure.
 
-**Case 3 — Node 9603: Government classified as Politician**
-
-Node 9603 is a government page incorrectly classified as a politician with 99.98% confidence.
-
-It has 148 neighbours:
-
-- 97 politician pages.
-- 47 government pages.
-- 3 TV show pages.
-- 1 company page.
-
-Politician pages account for approximately 65.5% of its neighbourhood.
-
-This case is particularly interesting because government and politician pages can have closely related graph connections.
-
-The model may therefore struggle to distinguish between the two categories when neighbourhood composition strongly favours politicians.
-
-Unlike an isolated low-degree node, this error occurs in a relatively well-connected part of the graph, demonstrating that additional connectivity does not always guarantee correct classification.
+However, this comparison alone does not prove causation. Controlled edge-removal or neighbourhood-perturbation experiments would be required to isolate the effect of graph structure.
 
 ### 8.4 Low-Confidence Errors
 
-**Case 4 — Node 6241: Government classified as TV show**
+**Case 4 — Node 6241: Government misclassified as TV Show**
 
-Node 6241 is a government page incorrectly classified as a TV show with confidence 0.3677.
+Both models classify this government page incorrectly, but their confidence scores differ substantially.
 
-The node has only four neighbours.
+The MLP predicts politician with 96.15% confidence, while the GCN predicts TV show with only 36.77% confidence.
 
-Unlike the high-confidence cases, the model does not assign a dominant probability to its selected category.
+The node has four neighbours: two government pages and two politician pages. None are TV show pages.
 
-This suggests greater uncertainty in the available classification evidence.
+This demonstrates that GCN predictions are not simply determined by the most common class among immediate neighbours. The node's attributes, learned transformations and potentially its two-hop neighbourhood may also influence the result.
 
-**Case 5 — Node 17895: Company classified as Politician**
+Under the validation-selected rejection policies, the MLP would automatically accept its incorrect prediction because 0.9615 exceeds its threshold of 0.920. The GCN would refer the node for human review because 0.3677 is below its threshold of 0.735.
 
-Node 17895 is a company page incorrectly classified as a politician with confidence 0.3487.
+Consequently, although both predictions are incorrect, the GCN produces a more operationally appropriate confidence outcome in this case.
 
-The node has three neighbours.
+**Case 5 — Node 17895: Company misclassified as Politician**
 
-Its low confidence suggests that the model finds the classification ambiguous.
+The MLP correctly predicts company with 62.40% confidence. The GCN incorrectly predicts politician with only 34.87% confidence.
 
-These examples are consistent with the possibility that limited connectivity provides less useful neighbourhood context. However, further investigation of their node features and neighbour categories would be needed to establish the precise cause.
+The node has three neighbours: two government pages and one company page. None are politician pages.
+
+This case illustrates that incorporating graph information can coincide with a deterioration in classification correctness, even without immediate neighbours belonging to the incorrectly predicted category.
+
+However, the relatively low GCN confidence means that the rejection policy would refer the prediction for manual review. The MLP would also refer its correct prediction because 0.6240 falls below its threshold of 0.920.
+
+The exact reason for the GCN's incorrect prediction remains unresolved without examining node attributes and deeper neighbourhood representations.
 
 ### 8.5 Failure Analysis Interpretation
 
-The five cases reveal two important limitations.
+The five representative cases reveal several distinct limitations of graph-based classification.
 
-First, graph convolution can propagate misleading information when neighbouring pages predominantly belong to an incorrect category.
+First, graph connectivity can be associated with extremely confident errors. Nodes 9077 and 9254 have neighbourhoods strongly dominated by the incorrectly predicted category, although both models also misclassify these nodes.
 
-This is evident in nodes 9077, 9254 and 9603, where the predicted category corresponds to the dominant neighbourhood category.
+Second, graph aggregation does not universally improve individual predictions. For nodes 9603 and 17895, the MLP predicts the correct category while the GCN does not. Node 9603 provides particularly compelling evidence of a potential harmful neighbourhood effect because its neighbours predominantly belong to the incorrect predicted category.
 
-Second, low-confidence predictions remain difficult to classify reliably.
+Third, immediate neighbour labels alone do not explain every GCN prediction. Nodes 6241 and 17895 are incorrectly classified into categories absent from their immediate neighbourhoods. This is consistent with the influence of node features, learned transformations and multi-hop graph context.
 
-The confidence-based rejection policy introduced in Section 7 can identify uncertain predictions for human review.
+Finally, the confidence-based rejection policy can mitigate some errors but cannot identify all of them. Low-confidence GCN errors such as nodes 6241 and 17895 would be referred for human review, while highly confident errors such as nodes 9077, 9254 and 9603 would still be automatically accepted.
 
-However, the rejection policy cannot guarantee that all incorrect predictions are detected.
-
-Highly confident errors may still be automatically accepted, demonstrating why aggregate accuracy and calibration metrics are insufficient for fully assessing reliability.
+These findings support using the GCN as a supervised classification assistant rather than an unrestricted automated decision system. They also motivate future experiments that selectively remove or perturb graph edges to establish whether neighbourhood information directly causes particular prediction errors.
 
 ### 8.6 Learned Node Embeddings
 
@@ -905,7 +889,7 @@ Furthermore, the GCN's ECE of 0.0190 is slightly worse than the MLP's ECE of 0.0
 
 Several limitations should be addressed before operational deployment.
 
-**Dataset representation:** The implementation uses 4,714 raw binary features rather than the 128-dimensional representation described in the assessment specification. This limits direct comparability with implementations using the prescribed representation.
+**Dataset representation:** The approved implementation uses 4,714 raw binary features instead of the 128-dimensional representation described in the original specification. Although appropriate for this project, the results are not directly comparable with experiments using the 128-dimensional representation.
 
 **Evaluation robustness:** The experiments use one random seed and one train/validation/test split. Repeating experiments across multiple seeds would provide stronger evidence of performance stability.
 
@@ -913,7 +897,7 @@ Several limitations should be addressed before operational deployment.
 
 **Graph dependence:** The GCN relies on the availability and quality of graph connections. Missing, misleading or changing connections may reduce classification performance.
 
-**Computational profiling:** The reported process memory measurements do not isolate peak GPU memory usage. More detailed profiling would be necessary for deployment planning.
+**Computational profiling:** Models were benchmarked independently using Apple MPS acceleration. Latency measurements are based on synchronised full-graph inference, while memory measurements capture observed PyTorch MPS allocations rather than true peak GPU memory. More detailed memory profiling would be required before deployment.
 
 **Generalisation:** The experiment uses a transductive setting in which the full graph structure is available. Performance on entirely new, previously unseen nodes or graphs has not been established.
 
@@ -1031,11 +1015,15 @@ Outputs are saved to:
 
 ### 10.7 Evaluating the Models
 
-After training, run:
 
-```bash
-python recognition/GCN_s4808310/predict.py
-```
+After training, evaluate both models using:
+
+`python recognition/GCN_s4808310/predict.py --device mps --model both`
+
+For independent resource benchmarking, run each model in a separate process:
+
+`python recognition/GCN_s4808310/predict.py --device mps --model mlp`
+`python recognition/GCN_s4808310/predict.py --device mps --model gcn`
 
 The evaluation script loads the saved checkpoints and produces:
 
