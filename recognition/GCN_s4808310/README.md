@@ -86,7 +86,7 @@ The train/validation/test split follows a reproducible 60/20/20 allocation using
 
 PyTorch and PyTorch Geometric were successfully installed and tested on a Mac with Apple MPS acceleration.
 
-**Dataset compatibility consideration:** The assessment specification describes a 128-dimensional feature representation, whereas the accessible UCI dataset provides 4,714 raw binary features. This difference was identified in the feasibility review as requiring approval or an appropriate fallback. The implemented experiments use the raw feature representation, and this distinction is retained in the final methodology.
+**Dataset compatibility consideration:** The assessment specification describes a 128-dimensional feature representation, whereas the UCI dataset provides 4,714 raw binary features. The use of the 4,714-dimensional representation was explicitly approved during the project feasibility process. All experiments therefore use this approved feature configuration.
 
 ### 2.4 Risks, Computing Budget and Fallback
 
@@ -837,30 +837,35 @@ These findings support using the GCN as a classification assistant with human ov
 
 ## 9. Computational Cost and Engineering Recommendation
 
+
 ### 9.1 Computational Efficiency
 
-Classification performance alone is insufficient to determine whether the GCN is preferable to the MLP. The additional computational cost of processing graph connections must also be considered.
+Classification performance alone is insufficient to determine whether the GCN is preferable to the MLP. Graph convolution introduces additional computational overhead because it aggregates information from connected nodes.
 
-Both models contain 302,020 trainable parameters, allowing their performance and computational requirements to be compared without differences in parameter count.
+Both models contain 302,020 trainable parameters, allowing comparison without differences in parameter count.
 
-Inference latency was measured using ten timed full-graph forward passes, following three warm-up passes.
+Both models were benchmarked independently in separate Python processes on an Apple M2 Pro using PyTorch's MPS backend. Inference latency was measured over ten synchronised full-graph forward passes following three warm-up runs.
 
 | Measurement | MLP | GCN |
 |---|---:|---:|
 | Parameters | 302,020 | 302,020 |
-| CPU inference latency | 19.63 ms | 55.55 ms |
-| MPS inference latency | 3.26 ms | 20.88 ms |
-| CPU process peak RSS | 904.19 MB | 1,116.41 MB |
+| Mean MPS full-graph inference latency | 3.45 ms | 20.65 ms |
+| Baseline MPS allocated memory | 415.16 MB | 415.16 MB |
+| Maximum observed MPS allocated memory | 415.50 MB | 415.50 MB |
+| Observed allocation increase | 0.34 MB | 0.34 MB |
 | Test accuracy | 89.01% | 94.57% |
 | Macro-F1 | 0.8837 | 0.9435 |
 
-The GCN requires approximately 2.83 times the CPU inference time of the MLP and approximately 6.40 times the MPS inference time in the recorded experiments.
+The GCN achieves a 5.56 percentage-point improvement in test accuracy but requires approximately 5.99 times the full-graph inference latency of the MLP.
 
-The additional cost is expected because graph convolution aggregates information across connected nodes, whereas the MLP applies linear transformations independently to node features.
+The increased latency is consistent with the additional graph aggregation operations performed by the GCN, whereas the MLP performs feature-only transformations.
 
-The CPU memory figures represent the process-wide peak resident memory observed during evaluation. They include the graph data, Python runtime and other allocated objects, and should not be interpreted as isolated model memory consumption.
+**Memory measurement limitations:** MPS memory measurements represent sampled PyTorch tensor allocations rather than true peak GPU memory usage. The baseline includes memory already allocated for the graph, model, and other tensors before profiling. Measurements taken after synchronised forward passes may not capture temporary allocations within individual operations.
 
-Similarly, these measurements do not establish peak GPU VRAM usage.
+Consequently, the identical observed memory figures do not establish that the two models have equal peak memory requirements. Further profiling would be needed to quantify true peak GPU memory consumption.
+
+Overall, the GCN incurs greater inference latency but provides a meaningful improvement in classification accuracy and the proportion of predictions suitable for automatic acceptance.
+
 
 ### 9.2 Performance Versus Computational Cost
 
